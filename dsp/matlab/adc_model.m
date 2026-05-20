@@ -61,7 +61,6 @@ classdef adc_model < handle
             obj.code_center= sum(obj.dig_weights_diff) / 2;             % ADC 理想中间码字输出
             obj.cp_top     = sum(obj.cap_weights_single) * obj.cunit;   % 设置 CDAC 正/负 单侧上极板寄生电容（实际 CDAC 包含 top/bottom 因此总上极板寄生应 x2）
             obj.init_hardware();                                            
-            fprintf("======== ADC Initialization Successfully! ========\n\n");
         end
 
         % ADC 参数初始化函数
@@ -342,7 +341,7 @@ classdef adc_model < handle
         % dcdl_step_set:DCDL 步长 fin_cal_skew:skew 校准输入信号频率 amp_cal_skew:skew 校准输入信号幅度
         % N_iter_skew:skew 校准后台迭代可观测次数 f_test:用于测试 ADC 校准前后动态性能信号频率 N_mc:蒙特卡洛测试点数
         % 一般设置 fft 测试信号频率等于后台 Timing Skew 校准信号频率，因为是后台校准 
-        function run_analysis_calib(obj,N_delay_os_gain, mu_os, mu_gain,f_cal_os_gain,...
+        function calib_run(obj,N_delay_os_gain, mu_os, mu_gain,f_cal_os_gain,...
                                     amp_cal_os_gain,N_iter_os_gain, N_sram, Nexp_os_gain,...
                                      N_delay_skew, dcdl_step_set, fin_cal_skew, amp_cal_skew, N_iter_skew,...
                                      f_test, N_mc)
@@ -407,17 +406,17 @@ classdef adc_model < handle
             
             % 绘制结果
             % 绘制三次校准的 FFT 频谱
-            figure('Name','FFT Spectrum','NumberTitle', 'off', 'Position', [200 100 900 700] );
+            figure('Name','FFT Spectrum','NumberTitle', 'off', 'Position', [200 100 1000 900]);
             ax1_one = subplot(3, 1, 1);
             ax2_one = subplot(3, 1, 2);
             ax3_one = subplot(3, 1, 3);
             obj.spectrum_plot(ax1_one, result_without_calib, 'FFT Spectrum Without Calib.');
             obj.spectrum_plot(ax2_one, result_os_gain, 'FFT Spectrum With OS/Gain Calib.');
-            obj.spectrum_plot(ax3_one, result_skew, 'FFT Spectrum With OS/Gain and Timing Skew Calib.');
+            obj.spectrum_plot(ax3_one, result_skew, 'FFT Spectrum With OS/Gain/Skew Calib.');
 
             % 绘制校准过程的迭代收敛图
             % OS 校准寄存器收敛
-            figure('Name', 'Convergence Process of Calibration', 'NumberTitle', 'off', 'Position', [200 100 900 700]);
+            figure('Name', 'Convergence Process of Calibration', 'NumberTitle', 'off', 'Position', [200 100 1000 900]);
             ax1_trace = subplot(3, 1, 1);
             ax2_trace = subplot(3, 1, 2);
             ax3_trace = subplot(3, 1, 3);
@@ -426,19 +425,19 @@ classdef adc_model < handle
             obj.trace_skew_plot(ax3_trace, trace_skew, 'Skew Calib. Register Convergence Trace', 'Skew Register Value');
 
             % 绘制蒙特卡洛测试直方图
-            figure('Name', 'Monte Carlo Result', 'NumberTitle','off','Position', [200 100 900 700]);
+            figure('Name', 'Monte Carlo Result', 'NumberTitle','off','Position', [200 100 1000 900]);
             ax1_mc = subplot(3, 2, 1);
             ax2_mc = subplot(3, 2, 2);
             ax3_mc = subplot(3, 2, 3);
             ax4_mc = subplot(3, 2, 4);
             ax5_mc = subplot(3, 2, 5);
             ax6_mc = subplot(3, 2, 6);
-            obj.mc_histogram_plot(ax1_mc, results_mc_none.ENOB_FS, 'bits', 'Histogram of ENOB@FS Without Calib.');
-            obj.mc_histogram_plot(ax2_mc, results_mc_none.SFDR, 'dBc', 'Histogram of SFDR Without Calib.');
-            obj.mc_histogram_plot(ax3_mc, results_mc_os_gain.ENOB_FS, 'bits', 'Histogram of ENOB@FS With OS/Gain Calib.');
-            obj.mc_histogram_plot(ax4_mc, results_mc_os_gain.SFDR, 'dBc', 'Histogram of SFDR With OS/Gain Calib.');
-            obj.mc_histogram_plot(ax5_mc, results_mc_skew.ENOB_FS, 'bits', 'Histogram of ENOB@FS With OS/Gain and Timing Skew Calib.');
-            obj.mc_histogram_plot(ax6_mc, results_mc_skew.SFDR, 'dBc', 'Histogram of SFDR With OS/Gain and Timing Skew Calib.');
+            obj.mc_histogram_plot(ax1_mc, results_mc_none.ENOB_FS, 'bits', 'ENOB@FS Without Calib.');
+            obj.mc_histogram_plot(ax2_mc, results_mc_none.SFDR, 'dBc', 'SFDR Without Calib.');
+            obj.mc_histogram_plot(ax3_mc, results_mc_os_gain.ENOB_FS, 'bits', 'ENOB@FS With OS/Gain Calib.');
+            obj.mc_histogram_plot(ax4_mc, results_mc_os_gain.SFDR, 'dBc', 'SFDR With OS/Gain Calib.');
+            obj.mc_histogram_plot(ax5_mc, results_mc_skew.ENOB_FS, 'bits', 'ENOB@FS With OS/Gain/Skew Calib.');
+            obj.mc_histogram_plot(ax6_mc, results_mc_skew.SFDR, 'dBc', 'SFDR With OS/Gain/Skew Calib.');
         end
 
         % 测试后台 Timing Skew 校准的跟踪特性
@@ -481,19 +480,19 @@ classdef adc_model < handle
             
             % 绘制测试结果
             fprintf('======== Plot the Result ========\n');
-            figure('Name','FFT Test before Change','NumberTitle','off','Position',[200 100 900 700]);
+            figure('Name','FFT Test before Change','NumberTitle','off','Position',[200 100 1000 900]);
             ax11 = subplot(3,1,1);
             obj.spectrum_plot(ax11, result_without_calib, 'FFT Spectrum Without OS/Gain Calib.');
             ax12 = subplot(3,1,2);
             obj.spectrum_plot(ax12, result_calib_os_gain, 'FFT Spectrum With OS/Gain Calib.');
             ax13 = subplot(3,1,3);
-            obj.spectrum_plot(ax13, result_calib_skew1, 'FFT Spectrum With OS/Gain and Timing Skew Calib.)');
-            figure('Name','FFT Test after Change','NumberTitle','off','Position',[200 100 900 700]);
+            obj.spectrum_plot(ax13, result_calib_skew1, 'FFT Spectrum With OS/Gain/Skew Calib.)');
+            figure('Name','FFT Test after Change','NumberTitle','off','Position',[200 100 1000 900]);
             ax21 = subplot(2,1,1);
             obj.spectrum_plot(ax21, result_change, 'FFT Spectrum Without Newest Skew Calib.');
             ax22 = subplot(2,1,2);
             obj.spectrum_plot(ax22, result_calib_skew2, 'FFT Spectrum With Newest Skew Calib.');
-            figure('Name', 'Convergence Process of Calib.', 'NumberTitle', 'off', 'Position', [200 100 900 700]);
+            figure('Name', 'Convergence Process of Calib.', 'NumberTitle', 'off', 'Position', [200 100 1000 900]);
             ax31 = subplot(3,1,1);
             obj.trace_plot(ax31, trace_os_gain.os /135 *0.6 , 'OS Calibration Register Convergence Trace', 'OS Register Value');
             ax32 = subplot(3,1,2);
@@ -909,7 +908,7 @@ classdef adc_model < handle
                 case 'fft'
                     set(ax, 'GridAlpha', 0.22);
                 case 'trace'
-                    set(ax, 'GridAlpha', 0.28);
+                    set(ax, 'GridAlpha', 0.25);
                 case 'hist'
                     set(ax, 'GridAlpha', 0.18);
                 otherwise
