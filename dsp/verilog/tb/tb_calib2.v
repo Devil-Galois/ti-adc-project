@@ -50,7 +50,7 @@ module tb_calib2();
 
     initial begin
         if ($test$plusargs("dump")) begin
-            $dumpfile("build/tb_skew_step.vcd");
+            $dumpfile("build/tb_calib2.vcd");
             $dumpvars(0, tb_calib2);
         end
     end
@@ -58,7 +58,7 @@ module tb_calib2();
     integer r_count; // 用于接收 $fscanf 的返回值
 
     initial begin
-        f_reg = $fopen("build/reg_cal1.txt", "r");
+        f_reg = $fopen("bin/reg_cal1.txt", "r");
         if (f_reg == 0) begin $display("Error: reg_cal1.txt not found!"); $fatal; end
         for (i = 1; i < 32; i = i + 1) begin
             r_count = $fscanf(f_reg, "%b", tmp_os);
@@ -76,7 +76,7 @@ module tb_calib2();
         end
         $fclose(f_reg);
 
-        $readmemb("data_gen/calib2_tran.txt", skew_mem);
+        $readmemb("bin/tran_data_calib2.txt", skew_mem);
 
         rst_n = 0; skew_cal_en = 0;din_bus = 0;
         #200 rst_n = 1; #100;
@@ -105,7 +105,7 @@ module tb_calib2();
         join
         repeat(10) @(posedge clk); 
 
-        f_sign = $fopen("build/dcdl_3bits.txt", "w");
+        f_sign = $fopen("bin/dcdl_3bits.txt", "w");
         if (f_sign == 0) begin
             $display("Verilog Error: Could not open dcdl_3bits.txt");
             $fatal;

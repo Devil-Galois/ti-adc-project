@@ -1,0 +1,605 @@
+\documentclass[UTF8,zihao=-4]{ctexart}
+
+\usepackage[a4paper,margin=2.25cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  urlcolor=blue!55!black,
+  citecolor=blue!55!black
+}
+
+\setlist[itemize]{nosep,leftmargin=1.7em}
+\setlist[enumerate]{nosep,leftmargin=1.9em}
+\renewcommand{\arraystretch}{1.18}
+\graphicspath{{../}}
+\sloppy
+
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\todoitem}[1]{\noindent\textbf{检查点：}#1\par}
+
+\title{\textbf{28 GS/s 32 通道 TI-SAR ADC 项目接手指南}}
+\author{基于 \code{nju\_paper.tex} 整理的工程交接版}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{文档定位与阅读路径}
+
+本文面向 ADC 设计项目交接，按系统指标、模块边界、关键仿真和校准接口组织 \code{nju\_paper.tex} 中与工程延续直接相关的内容。重点包括：
+\begin{itemize}
+  \item 56 Gb/s PAM-4 接收机对 ADC 采样率、动态性能和时钟抖动的约束；
+  \item 28 GS/s、32 通道 TI-SAR ADC 的架构分解与 \(2 \times 2 \times 8\) 分层交织关系；
+  \item 输入缓冲器、Rank-1 采样、子缓冲器、子 SAR、时钟和 DCDL 的模块规格与验证项目；
+  \item OS/Gain 与 Skew 校准覆盖的失配来源、模拟接口和验证状态。
+\end{itemize}
+
+推荐阅读路径为：\code{readme.md} 和 \code{spec.md} 用于确认项目边界与顶层规格；\code{design/cons/README.md} 用于复核模块性能约束；\code{design/schematic/README.md} 与 \code{design/sim/README.md} 用于定位电路图和仿真结果；\code{design/ref/README.md} 用于查阅模块相关参考文献。
+
+\begin{table}[H]
+\centering
+\caption{项目交付文件索引}
+\begin{tabularx}{\linewidth}{>{\ttfamily}p{0.32\linewidth}X}
+\toprule
+路径 & 内容 \\
+\midrule
+readme.md & 项目入口、目录说明、整体交付状态。\\
+spec.md & 面向交付的规格摘要，避免混入太多模块仿真细节。\\
+design/source.md & 原 Virtuoso 工程、论文章节、图片来源、cell 映射。\\
+design/cons/README.md & 模块约束、关键仿真和失配预算，是模拟接手的核心文档。\\
+design/schematic/README.md & 设计电路图索引，包含原工程截图和论文电路图。\\
+design/sim/README.md & 按模块重分类的仿真结果索引。\\
+design/ref/README.md & 按模块分组的参考文献资料。\\
+dsp/ & 已完成的 OS/Gain 与 Skew 校准算法、RTL 和验证脚本。\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\textbf{交付边界：}\code{dsp/} 为已完成校准部分。本指南只描述其与模拟 ADC、DCDL 和 32 路输出数据的接口关系。
+
+\section{项目概览}
+
+本项目面向 56 Gb/s PAM-4 接收机，设计一款 12 nm FinFET 工艺下的 28 GS/s、32 通道时间交织逐次逼近型 ADC。核心思路是：用时间交织获得总采样率，用 SAR 子 ADC 获得能效，用分层采样前端减轻高速输入和高交织因子的负担，再用 DSP 后台校准覆盖通道间失调、增益和采样时序偏斜。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\linewidth]{design/schematic/paper/top-overview.jpg}
+  \caption{28 GS/s 32 通道 TI-SAR ADC 顶层结构}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{核心指标速查}
+\begin{tabularx}{\linewidth}{>{\bfseries}p{0.25\linewidth}X}
+\toprule
+项目 & 指标 \\
+\midrule
+应用 & 56 Gb/s PAM-4 接收机，28 Gbaud，Nyquist 频率约 14 GHz。\\
+工艺 & 12 nm FinFET。\\
+ADC 架构 & 32 通道 TI-SAR ADC，分层交织结构为 \(2 \times 2 \times 8\)。\\
+采样率 & 总采样率 28 GS/s，子 SAR ADC 采样率 875 MS/s。\\
+分辨率 & 7-bit 量化加 1-bit 插入式 redundancy。\\
+输入 & 共模 550 mV，差分摆幅 600 mVpp。\\
+目标性能 & ENOB \(\geq\) 5.5-bit，SFDR \(\geq\) 45 dBc。\\
+前仿真结果 & 近 Nyquist 输入 TT 下 ENOB \(>\) 6-bit，SFDR \(>\) 46 dBc；代表值 SNDR 35.6 dB，SFDR 49.3 dBc。\\
+功耗 & ADC core power 88.31 mW；Walden FoM 48.6 fJ/conv-step；DSP 不计入 core power。\\
+验证状态 & 原理图级前仿真、MATLAB/Verilog 校准验证和 AMS skew 闭环验证；未完成 layout 后仿。\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{系统指标与架构依据}
+
+\subsection{56 Gb/s PAM-4 接收机指标}
+
+PAM-4 每个符号携带 2 bit 信息，因此 56 Gb/s 数据率对应 28 Gbaud 符号率。若按 Nyquist 速率采样，目标采样率为 28 GS/s，对应最高信号频率约 14 GHz。项目中把 ADC 输入共模设为 550 mV，差分摆幅设为 600 mVpp，是在接收机线性范围、比较器输入共模、子缓冲器输出共模和基准范围之间折中的结果。
+
+高速 ADC 的核心评价指标包括动态测试中的 SNDR、SFDR 和 ENOB：
+\[
+  \mathrm{ENOB}=\frac{\mathrm{SNDR}_{\mathrm{dB}}-1.76}{6.02}.
+\]
+对 14 GHz 输入而言，孔径抖动引入的 SNR 可近似为：
+\[
+  \mathrm{SNR}_j=-20\log_{10}(2\pi f_{\mathrm{in}}\sigma_t).
+\]
+若 jitter SNR 需大于约 35 dB，采样时刻 RMS 抖动需控制在约 200 fs 量级。因此，多相时钟、DCDL 和采样边沿匹配属于系统级关键约束。
+
+\subsection{ADC 架构选择}
+
+单通道 28 GS/s、约 6-bit 以上有效精度的 ADC 在功耗、输入电容和时钟要求上都非常困难。Flash ADC 速度快，但比较器数量随分辨率指数增长，输入电容和失调校准成本过高；Pipeline ADC 可做中高精度，但级间放大器和高频残差放大在低电压 FinFET 中代价大；SAR ADC 能效高、数字友好，但单通道速度受逐次逼近串行过程限制。
+
+时间交织的作用是把总采样率拆给多个子 ADC。本设计选用 32 路后，每个子 SAR 的工作频率为：
+\[
+  f_{\mathrm{sub}}=\frac{28~\mathrm{GS/s}}{32}=875~\mathrm{MS/s}.
+\]
+这个速率仍然高，但已进入可以用高速异步 SAR 实现的范围。
+
+\subsection{\texorpdfstring{\(2 \times 2 \times 8\)}{2 x 2 x 8} 分层交织结构}
+
+直接将 32 路采样器并联到输入端会显著增加输入电容、开关非线性、时钟相位偏斜和通道带宽失配。本设计将 32 路交织拆分为三层：
+\begin{itemize}
+  \item \(M=2\)：两路输入缓冲器分担输入驱动；
+  \item \(N=2\)：每路输入缓冲器驱动两个 Rank-1 主采样器，共 4 个主采样相位；
+  \item \(K=8\)：每个主采样保持节点通过一个子缓冲器驱动 8 个子 SAR ADC。
+\end{itemize}
+
+该结构将 Rank-1 主采样窗口放宽到约 70 ps，并将需 DCDL 精调的主相位数约束为 4 相，从而降低 skew 校准复杂度。结构代价是引入输入缓冲器和子缓冲器，前端线性度、带宽、阶跃响应和失配预算需要独立验证。
+
+\section{系统信号链与接手地图}
+
+从模拟输入到数字输出，本项目的信号链可以按以下顺序理解：
+\begin{enumerate}
+  \item 输入信号先经过阻抗匹配和输入缓冲器；
+  \item Rank-1 全分裂自举采样器完成 4 相主采样保持；
+  \item 子缓冲器把每个主采样保持值送给 8 个子 SAR；
+  \item Rank-2 时钟升压采样器把电压采到子 SAR CDAC 上；
+  \item CDAC、基准缓冲器、Strong ARM 比较器和异步 SAR 逻辑完成 875 MS/s 逐次逼近；
+  \item 32 路输出重组成 28 GS/s 采样序列；
+  \item DSP 先做 OS/Gain 校准，再做基于 MAD 的 skew 检测，并通过 SPI/DCDL 调整主采样相位。
+\end{enumerate}
+
+\begin{table}[H]
+\centering
+\caption{模块与关键风险}
+\begin{tabularx}{\linewidth}{>{\bfseries}p{0.22\linewidth}X}
+\toprule
+模块 & 关键复核内容 \\
+\midrule
+输入缓冲器 & 带载带宽、SFDR、输出共模、headroom。\\
+Rank-1 采样器 & 自举节点、主开关导通速度、采样窗口、过压可靠性、采样 SFDR。\\
+子缓冲器 & 输出阻抗、压摆率、大信号阶跃建立、CMFB 稳定性。\\
+Rank-2 采样器 & 时钟升压幅度、导通电阻、接 CDAC 后建立和可靠性。\\
+CDAC & 电容匹配、上极板寄生、冗余是否覆盖 MSB 建立误差。\\
+基准缓冲器 & worst-code transient、PSRR、去耦电容/功耗折中、基准失配。\\
+比较器 & 输入共模折中、噪声、offset、判决时间和能耗。\\
+异步 SAR 逻辑 & 动态节点保持、比较器复位环路、DAC 建立与下一次比较之间的裕量。\\
+时钟/DCDL & 4 相/32 相顺序、占空比、非交叠、DCDL 覆盖范围和步进。\\
+DSP 校准 & OS/Gain 统计量、MAD skew 方向码、DCDL 码更新关系。\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{采样前端}
+\label{sec:frontend}
+
+\subsection{输入缓冲器：隔离输入端，同时不能破坏线性度}
+
+输入缓冲器采用源跟随器结构，用于隔离外部输入网络与后级高速采样开关，降低 Rank-1 采样开关对输入端的直接冲击。该模块按高速低失真驱动器处理，核心指标为带载带宽、SFDR、输出共模、headroom 和 PVT 鲁棒性。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\linewidth]{design/schematic/paper/input-buffer-schematic.jpg}
+  \caption{输入缓冲器原理图}
+\end{figure}
+
+论文中按 Rank-1 采样器最差负载建立等效模型：采样开关导通电阻约 \(45~\Omega\)，采样电容约 \(80~\mathrm{fF}\)。在这个负载下，输入缓冲器不同 corner 的带宽需大于 22 GHz，TT 下约 24 GHz；目标输入频率范围内 SFDR 需优于 48 dB。由于该模块直接面对 14 GHz 附近输入，任何有限带宽、输出摆幅压缩或源跟随器非线性都会转化为高频动态性能下降。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.74\linewidth]{design/sim/input-buffer/tt-ac.jpg}
+  \caption{输入缓冲器带载 AC 仿真}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.74\linewidth]{design/sim/input-buffer/sfdr-vs-freq.jpg}
+  \caption{输入缓冲器 SFDR 随输入频率变化}
+\end{figure}
+
+\todoitem{输入缓冲器至少覆盖 DC transfer、AC 带宽、SFDR vs. input frequency、PVT headroom 和功耗。后仿带宽下降时，优先复核输入走线寄生、电源阻抗和 Rank-1 采样负载模型。}
+
+\subsection{Rank-1 全分裂自举采样器：把 14 GHz 输入可靠地采下来}
+
+Rank-1 采样器处在最敏感位置。它决定主采样线性度，也决定后级能否获得干净的保持电压。普通自举开关中，自举节点、主开关栅极和辅助节点耦合较强，高速下容易受时钟边沿和输入信号共同影响。本设计使用全分裂自举结构，将 X/Y 节点分离，其中 X 节点主要用于自举主开关。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.74\linewidth]{design/schematic/paper/rank-1-bootstrap-schematic.jpg}
+  \caption{Rank-1 全分裂自举采样器}
+\end{figure}
+
+设计中自举电容为 \(24~\mathrm{fF}\)。论文仿真表明，相比参考自举结构，全分裂结构自举电压提升约 130 mV，主开关导通提前超过 6.5 ps。对于 28 GS/s 系统，35.7 ps 是相邻全速采样间隔，Rank-1 主采样窗口虽然被分层结构放宽到约 70 ps，但几 ps 的导通改善仍然很有价值。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{design/sim/rank-1-th/bootstrap-tran-comparison.jpg}
+  \caption{Rank-1 自举瞬态对比}
+\end{figure}
+
+复核项目包括：
+\begin{itemize}
+  \item 主开关 \(V_{\mathrm{GS}}\) 是否足够且不过度信号相关；
+  \item 关键节点是否存在可靠性风险，例如 1 V 供电下 X 节点约 1.5 V；
+  \item 采样开关 SFDR 是否在目标输入频率范围内不限制系统 SFDR。
+\end{itemize}
+
+\subsection{子缓冲器：这里看的是大信号建立，不只是小信号带宽}
+
+Rank-1 采样后，每个主采样保持节点还要驱动 8 个子 SAR ADC。若直接驱动，负载过重，保持电压会被后级采样扰动拉动。因此本设计加入全差分 Class-AB 超级源跟随器作为子缓冲器。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\linewidth]{design/schematic/paper/sub-buffer-schematic.jpg}
+  \caption{Class-AB 超级源跟随器子缓冲器}
+\end{figure}
+
+子缓冲器负载按 \(40~\Omega + 120~\mathrm{fF}\) 建模。关键动态指标为大信号阶跃建立：Rank-1 输出发生最大差分阶跃时，Rank-2 子采样窗口内需建立到 \(1/2\) LSB 以内。论文中不同 corner 的最差阶跃建立时间小于 80 ps，子采样可用窗口约 120 ps。输出阻抗在 Nyquist 附近需小于 \(40~\Omega\)，PVT 范围约 23--37 \(\Omega\)。差分压摆率约 27.2--32.9 V/ns。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{design/sim/sub-buffer/tran-corner.jpg}
+  \caption{子缓冲器最大阶跃建立仿真}
+\end{figure}
+
+全差分结构需要单独验证 CMFB。当前 CMFB 相位裕度大于 \(80^\circ\)，TT 约 \(85^\circ\)。后仿中若出现输出共模漂移、阶跃尾部变慢或差分输出不对称，应复核 CMFB 环路、输出节点寄生和偏置电流。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.75\linewidth]{design/sim/sub-buffer/tt-stb-cmfb.jpg}
+  \caption{子缓冲器 CMFB 稳定性仿真}
+\end{figure}
+
+\subsection{采样前端失配：它决定 DSP 校准要覆盖多少}
+
+前端失配会在 32 路重组频谱中产生交织杂散。论文将分层采样前端作为整体进行 Monte Carlo：末端接入子 SAR ADC 采样电容，用于提取前端等效 offset 和 gain mismatch。
+
+失调测试时输入差分置零，提取各通道第二级采样结束时刻的电容差分电压；增益测试时输入端施加准静态差分信号，提取各通道采样结果并换算等效增益。统计上，以 CH0 为参考，采样前端 offset 的 99.7\% 分位约 14 mV，gain mismatch 的 99.7\% 分位约 0.4\%。这些数值会进入 \code{dsp/} 中 OS/Gain 校准的覆盖范围。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\linewidth]{design/sim/frontend-mismatch/mc-os-frontend-offset-hist.jpg}
+  \caption{采样前端 offset Monte Carlo}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\linewidth]{design/sim/frontend-mismatch/mc-gain-frontend-hist.jpg}
+  \caption{采样前端 gain mismatch Monte Carlo}
+\end{figure}
+
+\section{875 MS/s 子 SAR ADC}
+\label{sec:sar}
+
+\subsection{子 SAR ADC 时序约束}
+
+32 路交织后，单个子 SAR 的采样率为 875 MS/s，单周期约 1.143 ns。一个转换周期内需完成采样、比较器再生、CDAC 切换和 SAR 逻辑传播。7-bit 量化配合 1-bit redundancy 用于放宽 MSB 侧 DAC 建立和基准恢复要求。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.88\linewidth]{design/schematic/paper/sub-sar-architecture.jpg}
+  \caption{875 MS/s 子 SAR ADC 总体结构}
+\end{figure}
+
+\subsection{Rank-2 时钟升压采样器}
+
+Rank-2 采样器位于子 SAR 输入端，目标是把子缓冲器输出采到 CDAC 上。由于 CDAC 等效总采样电容约 \(120~\mathrm{fF}\)，采样开关需要足够低的导通电阻。本设计使用 1 V 供电的时钟升压采样开关，升压电容 \(20~\mathrm{fF}\)，不同 corner 下导通电阻不超过 \(40~\Omega\)。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\linewidth]{design/schematic/paper/rank-2-ck-booster-schematic.jpg}
+  \caption{Rank-2 时钟升压采样器}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.75\linewidth]{design/sim/rank-2-th/ck-booster-tran.jpg}
+  \caption{Rank-2 时钟升压瞬态}
+\end{figure}
+
+该模块需与 CDAC 联合验证。仿真项目包括空载升压幅度、接入 CDAC 后的采样建立、关键节点可靠性和 PVT 下导通电阻。
+
+\subsection{CDAC：恒定共模、分裂电容和 redundancy}
+
+子 SAR 使用恒定共模分裂电容单调切换 CDAC。单位电容为 \(0.5~\mathrm{fF}\)，加入冗余后的理论下限约 \(0.35~\mathrm{fF}\)，实际含寄生总采样电容约 \(120~\mathrm{fF}\)。CDAC 在 4C 后重复插入 4C，形成 1-bit redundancy，主要用于放宽 MSB 侧 DAC 建立误差和基准恢复要求。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{design/schematic/paper/sub-sar-cdac-schematic.jpg}
+  \caption{恒定共模分裂 CDAC}
+\end{figure}
+
+CDAC 接手检查应分成四层：
+\begin{enumerate}
+  \item \textbf{逻辑权重：}确认冗余位插入位置、权重和数字译码一致；
+  \item \textbf{动态建立：}理想基准驱动下，各位切换建立时间应小于约 18 ps；
+  \item \textbf{版图寄生：}上极板寄生约占总电容 1/2，后仿可能明显改变增益和建立；
+  \item \textbf{失配：}CDAC 总电容失配对通道 gain mismatch 贡献约 5\%，需要进入 gain 校准预算。
+\end{enumerate}
+
+\subsection{基准缓冲器：最坏码字瞬态比小信号指标更重要}
+
+基准缓冲器基于超级源跟随器，目标基准约 600 mV，基准范围 550--650 mV，片上去耦电容 4.5 pF。SAR CDAC 切换会周期性抽取基准电荷，因此 worst-code transient 是基准模块的核心验证项目。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.74\linewidth]{design/schematic/paper/reference-buffer-schematic.jpg}
+  \caption{基准缓冲器原理图}
+\end{figure}
+
+论文中的 worst-code transient 显示，基准从约 606 mV 下跌到 598 mV，并在 MSB 比较前恢复到约 601.7 mV，误差约 5 mV。由于 redundancy 在 MSB 阶段提供约 14 mV 容错，这个误差可以被覆盖；到第五次比较前，不同 corner 下误差小于 2 mV。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{design/sim/reference-buffer/tt-tran-vref.jpg}
+  \caption{基准缓冲器 TT 最坏码字瞬态}
+\end{figure}
+
+基准模块还需验证 PSRR 和内部环路稳定性。高频 PSRR 退化后仍需低于约 -25 dB。后仿中电源噪声和基准分发网络寄生会直接影响系统动态 SFDR。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\linewidth]{design/sim/reference-buffer/psrr.jpg}
+  \caption{基准缓冲器 PSRR 仿真}
+\end{figure}
+
+\subsection{Strong ARM 比较器：输入共模是速度、噪声和裕量的折中}
+
+比较器采用 Strong ARM 动态结构，比较器及后级逻辑使用 0.8 V 供电，PVT 覆盖 0.75--0.85 V。输入共模选为 500 mV，这是速度、噪声、输入范围和前级子缓冲器输出共模之间的折中。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.74\linewidth]{design/schematic/paper/strong-arm-comparator-schematic.jpg}
+  \caption{Strong ARM 比较器}
+\end{figure}
+
+TT 下比较器输入等效噪声约 1.22 mV，判决时间约 18.5 ps，能耗约 20.4 fJ。0.5 LSB 约 2.34 mV，因此比较器噪声已是不可忽略项。比较器 \(3\sigma\) offset 约 18 mV，作为 OS 校准覆盖的一部分。最慢 corner 下判决时间约 24.8 ps，需要和异步 SAR 时序联合检查。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.76\linewidth]{design/sim/comparator/vcm-tradeoff.jpg}
+  \caption{比较器输入共模折中}
+\end{figure}
+
+\subsection{动态 SAR 逻辑与异步时钟}
+
+SAR 逻辑采用 TSPC 动态触发器链，异步时钟由比较器输出、复位路径和延迟调节共同形成。它的优点是能避免高频全局 SAR 时钟，转换速度由真实关键路径决定；风险是动态节点保持、复位时序和 DAC 建立裕量必须全部对齐。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{design/schematic/paper/dynamic-logic-schematic.jpg}
+  \caption{SAR 动态逻辑}
+\end{figure}
+
+关键时序关系包括：
+\begin{itemize}
+  \item 比较器完成判决后，动态逻辑是否及时锁存结果；
+  \item CDAC 开关控制是否在下一次比较前完成建立；
+  \item R-Ladder delay tune 是否覆盖不同 corner 下的 loop delay；
+  \item 完整子 SAR 在最慢 corner 下是否仍保留约 84 ps 以上裕量。
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\linewidth]{design/sim/sar-logic/sub-sar-corner-timing.jpg}
+  \caption{子 SAR 不同 corner 时序裕量}
+\end{figure}
+
+\section{多相时钟、DCDL 与闭环校准}
+\label{sec:clock}
+
+\subsection{4 相主采样与 32 相子采样}
+
+时钟链从 14 GHz 差分输入开始，经 CML 二分频得到 4 相 7 GHz 主采样时钟，再通过分频、移位寄存器和占空比调节生成 32 相 875 MHz 子采样时钟。4 相主时钟约 41\% duty，子采样时钟约 11\% duty，小于 \(1/8\)，用于保证子通道之间非交叠。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\linewidth]{design/schematic/paper/clock-4phase-architecture.jpg}
+  \caption{4 相主采样时钟产生}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\linewidth]{design/schematic/paper/clock-32phase-architecture.jpg}
+  \caption{32 相子采样时钟产生}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.76\linewidth]{design/sim/clock/tran-tt-32-phase.jpg}
+  \caption{32 相时钟瞬态}
+\end{figure}
+
+时钟链验证包括相位顺序、占空比、非交叠、相邻边沿间隔和 PVT 鲁棒性。32 相顺序错误会在系统 FFT 中产生交织杂散，即使单个子 SAR 工作正常也无法满足动态指标。
+
+\subsection{DCDL：模拟可调延迟必须和 DSP 步进匹配}
+
+DCDL 基于可调负载电容结构，低 3 bit 为二进制控制，高 15 bit 为温度计码控制，等效约 7-bit 分辨率。DSP 每次 skew 校准迭代输出方向符号码，片上寄存器据此让 DCDL 码按 1 LSB 递增或递减。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.75\linewidth]{design/schematic/paper/dcdl-schematic.jpg}
+  \caption{DCDL 原理图}
+\end{figure}
+
+Monte Carlo 估计主相位 skew 覆盖需求约为 \(\pm 3.37\) ps。DCDL 多 corner 前仿真最小单边覆盖约 3.81 ps，最差步进约 87 fs。这里有两个关键判断：
+\begin{itemize}
+  \item 覆盖范围要大于主相位最坏 skew，否则 DSP 判断正确也调不到目标；
+  \item 步进不能过粗，否则闭环稳态误差会限制高频 SFDR。
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.76\linewidth]{design/sim/dcdl/delay-vs-code.jpg}
+  \caption{DCDL 延迟随控制码变化}
+\end{figure}
+
+\section{DSP 校准如何接入模拟设计}
+\label{sec:dsp}
+
+\subsection{OS/Gain 校准}
+
+OS/Gain 校准以 ADC0 为参考通道。DSP 用 EMA 统计各通道输出均值和绝对值均值，再用 LMS 迭代更新 offset 和 gain 校准寄存器。论文中参数选为 2 的幂次，便于 RTL 用移位替代乘法：
+\[
+  \alpha = 2^{-12}, \qquad \mu_o = 2^{-8}, \qquad \mu_g = 2^{-14}.
+\]
+这部分要覆盖的模拟失配包括：采样前端 offset 约 14 mV、比较器 \(3\sigma\) offset 约 18 mV、采样前端 gain mismatch 约 0.4\%，以及基准和 CDAC 造成的通道增益误差。
+
+\subsection{MAD Skew 校准}
+
+Skew 校准在 OS/Gain 后进行。由于模拟结构把 32 路通道归到 4 个主采样相位，DSP 会将 32 路数据按 4 相重组为 \(y_0[m],y_1[m],y_2[m],y_3[m]\)。相邻相位之间计算均值绝对差：
+\[
+  \bar{R}_p=\frac{1}{M}\sum_m |y_p[m]-y_{p+1}[m]|,
+\]
+其中 \(p=0,1,2,3\)，最后一相与下一周期第一相回绕相连。MAD 方法用绝对差替代乘积相关，避免硬件乘法器，适合高吞吐并行实现。
+
+RTL 实现中，32 通道 16-bit 校准后数据先截断为 8.6 格式，再计算 32 组相邻通道绝对差；每 8 个通道归到一个相位组，经加法树得到 \(\mathrm{beat\_sum}[p]\)。滑动窗口对应 \(\mathrm{CLK\_CNT\_MAX}=2048\) 个时钟周期。判决结果输出 3-bit skew 方向符号码，反馈给 DCDL。
+
+\subsection{校准验证状态}
+
+论文完成了三层验证：
+\begin{itemize}
+  \item MATLAB 行为级：验证 OS/Gain 与 MAD skew 算法收敛；
+  \item MATLAB-Verilog 协同：验证 RTL 与行为模型一致，RTL skew 校准后 SFDR 从 17.74 dBc 提升到 51.80 dBc；
+  \item Virtuoso-Verilog AMS：用实际 ADC 电路、SRAM、SPI 和 DCDL 闭环验证 skew 校准可压低交织杂散。
+\end{itemize}
+
+模拟端后续修改需确认 offset/gain/skew 范围仍落在 DSP 校准覆盖范围内。若后仿后 DCDL 范围、步进或时钟相位分布改变，应同步更新系统级行为模型。
+
+\section{顶层动态性能}
+
+顶层动态仿真使用 32 路重组后的输出序列。仿真输入为差分正弦，共模 550 mV，幅度约 \(\pm 295\) mV，FFT 点数 1024，扫输入频率并提取 SNDR、SFDR 和 ENOB。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.74\linewidth]{design/sim/top-level/dynamic-sndr-vs-freq.jpg}
+  \caption{顶层 SNDR vs. 输入频率}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.74\linewidth]{design/sim/top-level/dynamic-sfdr-vs-freq.jpg}
+  \caption{顶层 SFDR vs. 输入频率}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.74\linewidth]{design/sim/top-level/dynamic-enob-vs-freq.jpg}
+  \caption{顶层 ENOB vs. 输入频率}
+\end{figure}
+
+低频输入下，动态性能主要由量化噪声、比较器噪声和采样噪声限制；输入频率升高后，采样前端有限带宽、采样器非线性、时钟抖动和相位误差开始主导性能退化。论文结果显示，接近 Nyquist 频率时 TT corner 仍能维持 ENOB \(>\) 6-bit、SFDR \(>\) 46 dBc。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{design/sim/top-level/power-distribution.png}
+  \caption{顶层功耗分布}
+\end{figure}
+
+功耗方面，TT 下 core power 为 88.31 mW，单通道 SAR ADC 功耗约 1.22 mW，Walden FoM 为 48.6 fJ/conv-step。注意该功耗不包括片外 DSP。
+
+\section{接手复核流程}
+
+\subsection{第一轮：不用开仿真，先对齐文档和边界}
+
+\begin{enumerate}
+  \item 读 \code{readme.md}，确认项目目标、目录和交付状态；
+  \item 读 \code{spec.md}，确认顶层规格；
+  \item 读 \code{design/source.md}，确认原 Virtuoso cell、论文章节和图片来源；
+  \item 读 \code{design/cons/README.md}，建立模块级性能 checklist；
+  \item 读 \code{design/ref/README.md}，按模块定位参考论文。
+\end{enumerate}
+
+\subsection{第二轮：按信号链复查电路图}
+
+推荐顺序是输入缓冲器、Rank-1、子缓冲器、Rank-2、CDAC、基准、比较器、SAR 逻辑、时钟、DCDL。每看一个模块，都要回答：
+\begin{itemize}
+  \item 该模块对应的系统瓶颈；
+  \item 输入/输出共模和负载模型是什么；
+  \item 关键性能指标是小信号、动态、统计还是时序；
+  \item 仿真图是否真正覆盖了该指标；
+  \item 后仿中最可能退化的寄生路径在哪里。
+\end{itemize}
+
+\subsection{第三轮：按约束重跑或补跑仿真}
+
+\begin{longtable}{>{\bfseries}p{0.22\linewidth}p{0.34\linewidth}p{0.34\linewidth}}
+\caption{接手者仿真复查清单}\\
+\toprule
+模块 & 必查仿真 & 判断标准 \\
+\midrule
+\endfirsthead
+\toprule
+模块 & 必查仿真 & 判断标准 \\
+\midrule
+\endhead
+输入缓冲器 & DC、AC、SFDR 扫频、PVT headroom & 带宽 \(>\) 22 GHz，SFDR \(>\) 48 dB，输出共模不压缩后级。\\
+Rank-1 & 自举瞬态、关键节点电压、采样 SFDR & 自举提升约 130 mV，导通提前 \(>\) 6.5 ps，无可靠性红线。\\
+子缓冲器 & 阶跃建立、输出阻抗、CMFB stb & 80 ps 内 \(1/2\) LSB 建立，CMFB PM \(>\) 80 deg。\\
+前端失配 & offset/gain Monte Carlo & offset 约 14 mV，gain mismatch 约 0.4\%，与 DSP 范围一致。\\
+Rank-2 & ck booster transient、接 CDAC 建立 & \(R_{\mathrm{on}}\leq 40~\Omega\)，无关键节点过压。\\
+CDAC & 单位电容 MC、切换 transient、寄生提取 & 权重正确，建立 \(<\) 18 ps，寄生不破坏增益预算。\\
+基准 & PSRR、stb、worst-code transient & MSB 前恢复误差被 14 mV redundancy 覆盖。\\
+比较器 & VCM sweep、noise、offset、decision time & TT noise 约 1.22 mV，decision time 约 18.5 ps，offset 进入 OS 校准。\\
+SAR 逻辑 & dynamic logic、asyn loop、corner timing & 最慢 corner 保留约 84 ps 以上转换裕量。\\
+时钟 & 4 相/32 相 transient、占空比、相位顺序 & 相位顺序正确，子采样非交叠。\\
+DCDL & delay-code、PVT range、monotonicity & 单边覆盖约 3.81 ps，最差步进约 87 fs。\\
+顶层 & FFT vs. input frequency、power & 近 Nyquist TT 下 ENOB \(>\) 6-bit，SFDR \(>\) 46 dBc。\\
+\bottomrule
+\end{longtable}
+
+\section{后续版图与后仿风险}
+
+当前项目的主要限制是还没有完整 layout 后仿。进入后续工作时，优先风险如下：
+\begin{itemize}
+  \item \textbf{输入路径寄生：}会降低输入缓冲器带宽并增加 Rank-1 采样非线性；
+  \item \textbf{主采样相位失配：}会直接转换成交织杂散，DCDL 覆盖范围必须重新确认；
+  \item \textbf{子缓冲器输出节点寄生：}会拉长阶跃尾部，尤其影响高频输入下 SFDR；
+  \item \textbf{CDAC 上极板寄生：}会改变总采样电容、位权和 gain mismatch；
+  \item \textbf{基准分发网络：}IR drop、寄生电感/电阻会恶化 worst-code transient 和通道间 gain；
+  \item \textbf{比较器局部失配：}offset 可能仍可校准，但输入相关 kickback 会影响 CDAC 节点；
+  \item \textbf{时钟树版图：}32 相走线、占空比调节和 DCDL 后仿单调性必须复查；
+  \item \textbf{DSP 范围假设：}若模拟失配超过现有范围，不应只修改 RTL 位宽，应回到系统预算重新分配。
+\end{itemize}
+
+\section{故障定位路径}
+
+\subsection{顶层 SFDR 不够}
+
+根据杂散位置进行分类定位：杂散出现在 \(f_s/32\)、\(f_s/4\) 或相邻交织相关频点附近时，重点复核通道失配、主相位 skew 和相位顺序；谐波随输入频率移动时，重点复核输入缓冲器、Rank-1 采样器和子缓冲器线性度；高频输入下动态性能退化明显时，重点复核输入带宽、子缓冲器建立和时钟 jitter。
+
+\subsection{SNDR 够但 SFDR 不够}
+
+该现象通常对应非线性或周期性失配主导。复核顺序为输入 buffer SFDR、Rank-1 switch SFDR、CDAC 位权、基准瞬态和通道 gain/skew mismatch。
+
+\subsection{Skew 校准收敛但指标不改善}
+
+可能原因包括：DCDL 步进方向与 DSP 符号码映射反向；DCDL range 不足；4 相数据重组顺序错误；OS/Gain 未收敛导致 MAD 统计量被幅度失配污染；实际主导杂散来源为带宽失配或采样非线性。
+
+\subsection{后仿后基准或子缓冲器变慢}
+
+优先复核负载模型、输出节点寄生、CMFB 或内部环路相位裕度，以及 decap 位置与负载距离。若通过增加偏置电流恢复速度，应同步更新功耗分布和 FoM。
+
+\section{资料索引}
+
+\begin{longtable}{>{\ttfamily}p{0.38\linewidth}p{0.54\linewidth}}
+\toprule
+路径 & 内容 \\
+\midrule
+\endhead
+design/ref/README.md & 按模块分组的参考文献资料。\\
+design/cons/README.md & 模块性能约束与关键仿真要求。\\
+design/schematic/paper/ & 从论文原工程复制的架构图和电路图。\\
+design/schematic/README.md & 电路图索引和模块映射。\\
+design/sim/ & 按模块分类后的仿真图。\\
+spec.md & 面向交付的 ADC 规格摘要。\\
+dsp/reference.md & 校准算法参考资料。\\
+dsp/ & 已完成校准算法、RTL 和验证脚本。\\
+\bottomrule
+\end{longtable}
+
+\end{document}

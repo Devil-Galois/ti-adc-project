@@ -1,4 +1,3 @@
-// 这是 RTL 文件列表
 rtl/calib_fore.v
 rtl/correct.v
 rtl/d2signed.v
