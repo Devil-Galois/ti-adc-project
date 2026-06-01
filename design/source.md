@@ -2,21 +2,34 @@
 
 ## Virtuoso 原工程路径
 
-- 服务器工程目录：`/nfs/home/yangliqiong/Projects/tsmcN12/adc/`
+- 服务器工程打开：`cd ~/Projects/tsmc12/ICT_work`后按原命令打开 Cadence
 
 ## 模块目录映射
 
-| 本仓库模块 | Virtuoso / 原工程路径 |
+| 本仓库模块 | library / cellview |
 |---|---|
-| input-buffer | `./TIADCproject#2dTest/input#2dbuffer` |
-| rank-1-th | `./TIADCproject#2dTest/bs` |
-| sub-buffer | `./TIADCproject#2dTest/sub#2dbuffer` |
-| rank-2-th | `./TIADCproject#2dTest/ckbooster` |
-| cdac-layout | `./../TI_SAR_ADC/ict_adc_12nm/LU_CAP` |
-| cdac-schematic | `./adc/cdac` |
-| sub-ad | `./TIADCproject#2dTest/sub#2dad#2dtest` |
-| top-level | `./TIADCproject#2dTest/top#2dtest` |
-| t-coil | `./TIADCproject#2dTest/tcoil` |
+| 输入缓冲器 | `ict_tsmcN12_adc/input_buf` |
+| 第一级采样自举开关 | `ict_tsmcN12_adc/rank1_sam` |
+| 子缓冲器 | `ict_tsmcN12_adc/sub_buf` |
+| 第二级采样时钟升压 | `ict_tsmcN12_adc/rank2_sam` |
+| 理想 CDAC | `ict_tsmcN12_adc/cdac_ideal` |
+| CDAC 版图参考 | `./adc/cdac` |
+| 动态逻辑单元 | `ict_tsmcN12_adc/dl_unit` |
+| SAR 逻辑 | `ict_tsmcN12_adc/sar` |
+| 基准缓冲器 | `ict_tsmcN12_adc/ref_buf` |
+| 比较器 | `ict_tsmcN12_adc/comparator` |
+| 子 SAR ADC | `ict_tsmcN12_adc/sub_ad` |
+| 多相时钟 | `ict_tsmcN12_adc/clock`|
+| CML 分频器 | `ict_tsmcN12_adc/cml_div2`|
+| 非重叠时钟生成器| `ict_tsmcN12_adc/non_overlapping` |
+| CMOS 分频器 | `ict_tsmcN12_adc/cmos_div8`|
+| 8 相时钟生成器 | `ict_tsmcN12_adc/gen_clock8`|
+| 占空比调节电路 | `ict_tsmcN12_adc/duty_adj`|
+| DCDL 电路 | `ict_tsmcN12_adc/dcdl`|
+| 顶层设计 | `ict_tsmcN12_adc/ti-adc`|
+| 理想 DEC | `ict_tsmcN12_adc/dec` |
+| 理想减法器 | `ict_tsmcN12_adc/minus_ideal`|
+| 理想 MUX | `ict_tsmcN12_adc/mux_ideal`|
 
 ## 论文来源
 
