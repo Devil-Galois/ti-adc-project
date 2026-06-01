@@ -31,3 +31,4 @@
 | 理想减法器 | `ict_tsmcN12_adc/minus_ideal`|
 | 理想 MUX | `ict_tsmcN12_adc/mux_ideal`|
 
+- 另提供非差分形式非 Class AB 结构的超级源跟随器作为子缓冲器的结构，功耗更大 `ict_tsmcN12_adc/sub_buf_version2`
