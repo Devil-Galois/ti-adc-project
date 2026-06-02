@@ -31,5 +31,5 @@
 | 理想减法器 | `ict_tsmcN12_adc/minus_ideal`|verilogA|
 | 理想 MUX | `ict_tsmcN12_adc/mux_ideal`|
 
-- 顶层模块和仿真自行搭建
+- 顶层模块参考 ~/Projects/tsmc12/adc/TIADCproject#2dTest/top#2dtest 自行搭建，仿真目标参考设计约束
 - 另提供非差分形式非 Class AB 结构的超级源跟随器作为子缓冲器的结构，功耗更大 `ict_tsmcN12_adc/sub_buf_version2`
