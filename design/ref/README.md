@@ -94,10 +94,3 @@
 | MAD timing-skew 校准 | Gu M. et al. "A 3.7mW 11b 1GS/s TI-SAR ADC...", ESSCIRC, 2023. DOI: 10.1109/ESSCIRC59616.2023.10268795 | MAD/相关检测与 DCDL 闭环校准参考 |
 | Dither-based skew 校准 | Tao Y. et al., ISSCC 2024. DOI: 10.1109/ISSCC49657.2024.10454299 | 参考信号注入法和后台 timing-skew 校准参考 |
 | Global dither injection | Cao Y. et al., ISSCC 2024. DOI: 10.1109/ISSCC49657.2024.10454350 | 输入统计无关的 skew 校准参考 |
-
-## 本项目资料来源
-
-- 论文工程目录：`C:\Users\15062\Desktop\nju_paper`
-- 论文主文件：`C:\Users\15062\Desktop\nju_paper\nju_paper.tex`
-- 参考文献库：`C:\Users\15062\Desktop\nju_paper\ref.bib`
-- Cadence 原工程路径见 `design/source.md`。
